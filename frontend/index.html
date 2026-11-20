@@ -53,6 +53,7 @@ createApp({
     const username=ref('admin'), password=ref('123456'), err=ref(''), actionErr=ref('');
     const leftTab=ref(0), rightTab=ref(0);
     const versions=ref([]), mappings=ref([]), formal=ref([]), conflicts=ref([]);
+    const ledger=ref([]), rejections=ref([]), contention=ref([]), attest=ref(null);
     const oldKey=ref('OLD-B1');
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
     async function login(){
@@ -80,6 +81,19 @@ createApp({
       formal.value=Array.isArray(f.items)?f.items:[];
       const c=await loadJson('/api/conflicts'); if(c===null) return;
       conflicts.value=Array.isArray(c.items)?c.items:[];
+      const l=await loadJson('/api/retirement-ledger'); if(l===null) return;
+      ledger.value=Array.isArray(l.items)?l.items:[];
+      const rj=await loadJson('/api/remap-rejections'); if(rj===null) return;
+      rejections.value=Array.isArray(rj.items)?rj.items:[];
+      const ct=await loadJson('/api/lock-contention'); if(ct===null) return;
+      contention.value=Array.isArray(ct.items)?ct.items:[];
+      attest.value=await loadJson('/api/attestation');
+    }
+    async function doRetire(m){
+      actionErr.value='';
+      const r=await fetch('/api/mappings/'+m.id+'/retire',{method:'POST',headers:auth(),body:JSON.stringify({reason:'下线'})});
+      const j=await r.json(); actionErr.value=r.ok?('已退役 '+j.old_key):(j.detail||'失败');
+      await refresh();
     }
     async function doRemap(){
       actionErr.value='';
@@ -88,7 +102,7 @@ createApp({
       await refresh();
     }
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,actionErr,leftTab,rightTab,versions,mappings,formal,conflicts,oldKey,login,logout,doRemap};
+    return {token,user,username,password,err,actionErr,leftTab,rightTab,versions,mappings,formal,conflicts,oldKey,login,logout,doRemap,doRetire,ledger,rejections,contention,attest};
   },
   template:`
   <div v-if="!token" class="login">
@@ -113,8 +127,13 @@ createApp({
           <table><thead><tr><th>version</th><th>status</th><th>from</th></tr></thead>
           <tbody><tr v-for="v in versions" :key="v.id"><td>{{v.version}}</td><td>{{v.status}}</td><td>{{v.effective_from}}</td></tr></tbody></table>
           <h2 style="margin-top:14px">Mappings</h2>
-          <table><thead><tr><th>old</th><th>new</th><th>kind</th></tr></thead>
-          <tbody><tr v-for="m in mappings" :key="m.id"><td>{{m.old_key}}</td><td class="ok">{{m.new_key}}</td><td>{{m.kind}}</td></tr></tbody></table>
+          <table><thead><tr><th>old</th><th>new</th><th>kind</th><th>status</th><th></th></tr></thead>
+          <tbody><tr v-for="m in mappings" :key="m.id"><td>{{m.old_key}}</td><td class="ok">{{m.new_key}}</td><td>{{m.kind}}</td>
+            <td :class="m.status==='已退役'?'bad':'ok'">{{m.status}}</td>
+            <td><button v-if="m.status!=='已退役'" class="ghost" @click="doRetire(m)">退役</button></td></tr></tbody></table>
+          <h2 style="margin-top:14px">退役台账</h2>
+          <table><thead><tr><th>mapping</th><th>old</th><th>at</th><th>watermark</th></tr></thead>
+          <tbody><tr v-for="l in ledger" :key="l.id"><td>{{l.mapping_id}}</td><td>{{l.old_key}}</td><td>{{l.retired_at}}</td><td>{{l.formal_watermark}}</td></tr></tbody></table>
         </div>
         <div class="box" v-show="leftTab===1">
           <h2>Ingress Remap</h2>
@@ -129,6 +148,7 @@ createApp({
         <div class="tabs">
           <button :class="{on:rightTab===0}" @click="rightTab=0">正式区</button>
           <button :class="{on:rightTab===1}" @click="rightTab=1">冲突队列</button>
+          <button :class="{on:rightTab===2}" @click="rightTab=2">互证页</button>
         </div>
         <div class="box" v-show="rightTab===0">
           <h2>Formal Zone</h2>
@@ -139,6 +159,17 @@ createApp({
           <h2>Conflicts</h2>
           <table><thead><tr><th>old</th><th>reason</th><th>status</th></tr></thead>
           <tbody><tr v-for="c in conflicts" :key="c.id"><td class="bad">{{c.old_key}}</td><td>{{c.reason}}</td><td>{{c.status}}</td></tr></tbody></table>
+        </div>
+        <div class="box" v-show="rightTab===2">
+          <h2>互证页 <span :class="'pill '+(attest&&attest.consistent?'ok':'bad')">{{attest&&attest.consistent?'同态':'分裂'}}</span></h2>
+          <table><thead><tr><th>check</th><th>ok</th><th>detail</th></tr></thead>
+          <tbody><tr v-for="k in (attest?attest.checks:[])" :key="k.check"><td>{{k.check}}</td><td :class="k.ok?'ok':'bad'">{{k.ok}}</td><td>{{k.detail}}</td></tr></tbody></table>
+          <h2 style="margin-top:14px">拒映审计</h2>
+          <table><thead><tr><th>old</th><th>reason</th><th>outcome</th><th>at</th></tr></thead>
+          <tbody><tr v-for="r in rejections" :key="r.id"><td>{{r.old_key}}</td><td>{{r.reason}}</td><td class="bad">{{r.outcome}}</td><td>{{r.created_at}}</td></tr></tbody></table>
+          <h2 style="margin-top:14px">锁争用</h2>
+          <table><thead><tr><th>lock</th><th>old</th><th>holder</th><th>contender</th></tr></thead>
+          <tbody><tr v-for="x in contention" :key="x.id"><td>{{x.lock_key}}</td><td>{{x.old_key}}</td><td>{{x.holder}}</td><td>{{x.contender}}</td></tr></tbody></table>
         </div>
       </div>
     </div>

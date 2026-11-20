@@ -32,6 +32,21 @@
 - 废弃旧键只读保留 vs 重写正式键
 - 生效窗原子切换 vs 双窗按事件时裁
 
+## 退役口径（已锁定 → 见 `ops/退役修复卡_2026-11-20.md`）
+
+退役后重映走**甲路径：拒新映**。`POST /api/remap` 命中已退役映射即整笔拒绝（409），正式区零增，写拒映审计。退役、重映均占 `map_row` 锁，后到只记争用。
+
+五处同态：退役台账 / 正式实体 / 拒映审计 / 互证页 / 映射册。只改徽章判失败。
+
+| 接口 | 说明 |
+|------|------|
+| `POST /api/mappings/{id}/retire` | 退役映射（写台账，不另开退役台） |
+| `POST /api/remap` | 入站重映（命中退役则拒映 + 审计） |
+| `GET /api/retirement-ledger` | 退役台账 |
+| `GET /api/remap-rejections` | 拒映审计 |
+| `GET /api/lock-contention` | 抢写争用 |
+| `GET /api/attestation` | 互证页，`consistent=true` 为同态 |
+
 ## 启动（一键）
 
 `powershell
